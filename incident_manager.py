@@ -19,7 +19,7 @@ from collections import deque
 class IncidentManager:
     """Manages incident logging, snapshot evidence generation, and query retrieval."""
 
-    def __init__(self, max_incidents: int = 150, save_dir: str = "incidents"):
+    def __init__(self, max_incidents: int = 150, save_dir: str = "snapshots"):
         self.save_dir = save_dir
         if self.save_dir:
             os.makedirs(self.save_dir, exist_ok=True)

@@ -391,9 +391,10 @@ def main() -> None:
         # ── S -> save frame ───────────────────────────────────────────────
         elif key in (ord('s'), ord('S')):
             if annotated_frame is not None:
-                fname = f"capture_{frame_no:06d}.png"
+                os.makedirs("snapshots", exist_ok=True)
+                fname = os.path.join("snapshots", f"capture_{frame_no:06d}.png")
                 cv2.imwrite(fname, annotated_frame)
-                print(f"[INFO] Saved screenshot -> {fname}")
+                print(f"[INFO] Saved screenshot -> {os.path.abspath(fname)}")
 
     cap.release()
     cv2.destroyAllWindows()
