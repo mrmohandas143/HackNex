@@ -209,7 +209,9 @@ def query_loop(qa: QAEngine,
                 print(f"  📸  INCIDENT EVIDENCE LOCATED:")
                 print(f"      Event : {incident['event_type'].upper()} ({incident['class']} #{incident['track_id']})")
                 print(f"      Point : {incident['time_str']}  (Frame #{incident['frame_no']})")
-                print(f"      Image : Opened in 'Incident Evidence' window!")
+                if incident.get("file_path"):
+                    print(f"      Saved : {os.path.abspath(incident['file_path'])}")
+                print(f"      Window: Opened in 'Incident Evidence' window!")
                 if is_video_file:
                     print(f"  👉  Type 'jump' or 'j' to seek video to this incident.")
                 print("-" * 60)

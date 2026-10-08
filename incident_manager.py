@@ -9,6 +9,7 @@ Captures, indexes, and visualizes incidents where they occur:
 100% open-source, local, OpenCV + NumPy.
 """
 
+import os
 import time
 import cv2
 import numpy as np
@@ -18,7 +19,10 @@ from collections import deque
 class IncidentManager:
     """Manages incident logging, snapshot evidence generation, and query retrieval."""
 
-    def __init__(self, max_incidents: int = 150):
+    def __init__(self, max_incidents: int = 150, save_dir: str = "incidents"):
+        self.save_dir = save_dir
+        if self.save_dir:
+            os.makedirs(self.save_dir, exist_ok=True)
         self.incidents: deque[dict] = deque(maxlen=max_incidents)
         self.best_keyframes: dict[int, dict] = {}  # track_id -> best view record
 
@@ -242,5 +246,16 @@ class IncidentManager:
         nav_hint = "  [INCIDENT VIEWER] Press any key or Enter to return | Type 'jump' / 'j' in terminal to seek video"
         cv2.putText(frame, nav_hint, (6, h - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 240, 180), 1, cv2.LINE_AA)
+
+        # Auto-save evidence image to disk
+        if self.save_dir:
+            safe_type = str(event_type).upper().replace(" ", "_")
+            fname = f"incident_{incident.get('id', 1):03d}_{safe_type}_frame{frame_no:06d}.png"
+            fpath = os.path.join(self.save_dir, fname)
+            try:
+                cv2.imwrite(fpath, frame)
+                incident["file_path"] = fpath
+            except Exception:
+                pass
 
         return frame
