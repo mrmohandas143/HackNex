@@ -23,6 +23,7 @@ import time
 os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
 
 import cv2
+import numpy as np
 
 from detector import YOLODetector
 from scene_builder import SceneBuilder
