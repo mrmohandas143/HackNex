@@ -25,13 +25,14 @@ import cv2
 from detector import YOLODetector
 from scene_builder import SceneBuilder
 from qa_engine import QAEngine
+from temporal_tracker import TemporalTracker
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 BANNER = r"""
   ╔══════════════════════════════════════════════════════════════╗
-  ║        Vision AI  —  Tier 1  (YOLO + Rule-based Q&A)        ║
-  ║   Object Detection  |  Tracking  |  Color Analysis  |  QA   ║
+  ║     Vision AI  —  Tier 2  (Deep Attributes & Reasoning)     ║
+  ║  YOLO + Temporal Tracking + Anatomical Analysis + Memory Q&A ║
   ╚══════════════════════════════════════════════════════════════╝
 """
 
@@ -43,14 +44,19 @@ HELP = """
   [S]    Save annotated frame as PNG
   [ESC]  Exit
 
-  Example queries
+  Example Tier 2 queries:
   ─────────────────────────────────────
-  "What is in the frame?" / "What is in the image?"
-  "Which color is the tshirt?" / "What color is the shirt?"
-  "How many people are there?"
-  "Where is the person?"
-  "Is there a car?"
-  "Describe the scene"
+  Accessories:    "Does the person wear any earrings?"
+                  "Is the person wearing glasses?" / "Any hat?"
+  Weapons & Items:"Does the person have any weapon?"
+                  "Are they holding anything?"
+  Outfit & Color: "What is the person wearing?"
+                  "Which color is the tshirt?" / "What color are the pants?"
+  Posture & Action:"Is the person sitting or standing?"
+                  "Which direction are they moving?"
+  Temporal Memory:"How long has the person been here?"
+                  "Did anyone enter or leave recently?"
+  Conversational: "And what about the pants?" (follow-up)
 """
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -166,9 +172,10 @@ def main() -> None:
     source, cam_indices, current_cam = resolve_source(sys.argv[1:])
 
     # ── Component init ────────────────────────────────────────────────────
-    detector      = YOLODetector()
-    scene_builder = SceneBuilder()
-    qa_engine     = QAEngine()
+    detector         = YOLODetector()
+    temporal_tracker = TemporalTracker()
+    scene_builder    = SceneBuilder()
+    qa_engine        = QAEngine(temporal_tracker=temporal_tracker)
 
     print(HELP)
 
@@ -224,6 +231,7 @@ def main() -> None:
 
             # ── YOLO detect + track ───────────────────────────────────────
             detections = detector.detect(frame)
+            detections = temporal_tracker.update(detections)
 
             # ── Build scene context ───────────────────────────────────────
             scene = scene_builder.build(frame, detections)

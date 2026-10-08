@@ -1,29 +1,28 @@
 import cv2
 import numpy as np
 from utils import get_dominant_color, draw_label, COLOR_BGR_MAP
+from attribute_analyzer import AttributeAnalyzer
 
 
 class SceneBuilder:
     """
+    Tier 2 Scene Builder:
     Enriches raw YOLO detections with:
-      - dominant color per object crop
-      - spatial position label (e.g. 'top-left')
-      - human-readable scene description string
+      - Dominant color & posture analysis
+      - Fine-grained attributes (earrings, glasses, weapons, pants, hats)
+      - Temporal motion metrics (dwell time, speed, direction)
+      - Spatial position label
+      - Natural scene description
     """
+
+    def __init__(self):
+        self.attr_analyzer = AttributeAnalyzer()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def build(self, frame: np.ndarray, detections: list[dict]) -> dict:
         """
-        Build a scene context dict from a frame + raw YOLO detections.
-
-        Returns:
-            {
-              objects       : list of enriched object dicts,
-              object_counts : {class_name: count},
-              total_count   : int,
-              description   : str,
-            }
+        Build an enriched scene context dict from a frame + detections.
         """
         h, w = frame.shape[:2]
         scene = {
@@ -44,33 +43,35 @@ class SceneBuilder:
             crop = frame[y1:y2, x1:x2]
             color_bgr, color_name = get_dominant_color(crop)
 
+            # Deep anatomical & attribute inspection for persons
+            attrs = None
             clothing_color = color_name
-            clothing_bgr = color_bgr
+            pants_color = "unknown"
+            posture = "unknown"
+
             if det["class"] == "person":
-                box_h = y2 - y1
-                box_w = x2 - x1
-                # Torso is roughly 15% to 60% down from top, central 70% width
-                t_y1 = y1 + int(box_h * 0.15)
-                t_y2 = y1 + int(box_h * 0.60)
-                t_x1 = x1 + int(box_w * 0.15)
-                t_x2 = x2 - int(box_w * 0.15)
-                if t_y2 > t_y1 and t_x2 > t_x1:
-                    torso_crop = frame[t_y1:t_y2, t_x1:t_x2]
-                    t_bgr, t_name = get_dominant_color(torso_crop)
-                    if t_name not in ("unknown", "colorful"):
-                        clothing_color = t_name
-                        clothing_bgr = t_bgr
+                attrs = self.attr_analyzer.inspect_person(frame, (x1, y1, x2, y2))
+                if attrs["shirt_color"] not in ("unknown", "colorful"):
+                    clothing_color = attrs["shirt_color"]
+                pants_color = attrs["pants_color"]
+                posture = attrs["posture"]
 
             enriched = {
-                "id":             det["id"],
-                "class":          det["class"],
-                "confidence":     det["confidence"],
-                "bbox":           (x1, y1, x2, y2),
-                "color":          color_name,
-                "color_bgr":      color_bgr,
-                "clothing_color": clothing_color,
-                "clothing_bgr":   clothing_bgr,
-                "position":       self._position_label(w, h, x1, y1, x2, y2),
+                "id":               det["id"],
+                "class":            det["class"],
+                "confidence":       det["confidence"],
+                "bbox":             (x1, y1, x2, y2),
+                "color":            color_name,
+                "color_bgr":        color_bgr,
+                "clothing_color":   clothing_color,
+                "pants_color":      pants_color,
+                "posture":          posture,
+                "attributes":       attrs,
+                "dwell_time":       det.get("dwell_time_sec", 0.0),
+                "motion_direction": det.get("motion_direction", "stationary"),
+                "is_moving":        det.get("is_moving", False),
+                "velocity_px_s":    det.get("velocity_px_s", 0.0),
+                "position":         self._position_label(w, h, x1, y1, x2, y2),
             }
             scene["objects"].append(enriched)
 
@@ -83,9 +84,7 @@ class SceneBuilder:
     # ── HUD overlay ───────────────────────────────────────────────────────────
 
     def draw_summary(self, frame: np.ndarray, scene: dict) -> np.ndarray:
-        """
-        Draw a heads-up display bar at the top and a hint bar at the bottom.
-        """
+        """Draw heads-up display bar at top and key hint bar at bottom."""
         h, w = frame.shape[:2]
 
         # ── Top bar ──────────────────────────────────────────────────────
@@ -105,11 +104,11 @@ class SceneBuilder:
                     (4, 21), cv2.FONT_HERSHEY_SIMPLEX, 0.52,
                     (0, 230, 140), 1, cv2.LINE_AA)
 
-        # Frame count badge (top-right)
-        badge = f"Objects: {scene['total_count']}"
-        (bw, _), _ = cv2.getTextSize(badge, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
+        # Badge: objects + tier indicator
+        badge = f"Tier 2 AI  |  Objects: {scene['total_count']}"
+        (bw, _), _ = cv2.getTextSize(badge, cv2.FONT_HERSHEY_SIMPLEX, 0.50, 1)
         cv2.putText(frame, badge,
-                    (w - bw - 8, 21), cv2.FONT_HERSHEY_SIMPLEX, 0.52,
+                    (w - bw - 8, 21), cv2.FONT_HERSHEY_SIMPLEX, 0.50,
                     (80, 200, 255), 1, cv2.LINE_AA)
 
         # ── Bottom hint bar ───────────────────────────────────────────────
@@ -139,8 +138,13 @@ class SceneBuilder:
     def _describe(scene: dict) -> str:
         if not scene["objects"]:
             return "No objects detected in the frame."
-        parts = [
-            f"a {o['color']} {o['class']} (ID:{o['id']}, {o['position']})"
-            for o in scene["objects"]
-        ]
+        parts = []
+        for o in scene["objects"]:
+            desc = f"a {o['color']} {o['class']} (ID:#{o['id']}, {o['position']}"
+            if o.get("posture") and o["posture"] != "unknown":
+                desc += f", {o['posture']}"
+            if o.get("motion_direction") and "still" not in o["motion_direction"] and "stationary" not in o["motion_direction"]:
+                desc += f", {o['motion_direction']}"
+            desc += ")"
+            parts.append(desc)
         return "In the frame: " + ", ".join(parts) + "."

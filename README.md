@@ -1,12 +1,14 @@
-# Vision AI — Tier 1 (Lightweight, Open-Source & Torch-Free)
+# Vision AI — Tier 2 (Deep Attribute Inspection, Temporal Tracking & Conversational Q&A)
 
-A fast, lightweight, and completely local computer vision application that detects and tracks objects in real-time video (live webcams or pre-recorded videos) and answers natural language queries about the scene.
+A fast, lightweight, and completely local computer vision application that detects and tracks objects in real-time video (live webcams or pre-recorded videos) and performs deep multimodal visual reasoning without external APIs.
 
-- **100% Torch-Free & Lightweight**: No heavy 2.5GB PyTorch download. Runs inference via OpenCV (`cv2.dnn`) and NumPy.
+- **100% Torch-Free & Lightweight**: No heavy 2.5GB PyTorch download. Runs inference via OpenCV (`cv2.dnn`), NumPy, and ONNX Runtime.
 - **Fully Offline & Free**: Requires zero servers, zero API keys, and no paid resources.
-- **Object Detection & Tracking**: Uses YOLOv4-tiny (~24MB) with a pure-NumPy IoU tracker assigning persistent track IDs across frames.
-- **Multi-Camera Support**: Automatic detection of external USB webcams with runtime camera switching (`[C]`).
-- **Scene Analysis & Q&A**: Answers questions about object counts, locations, presence, and colors (including clothing and t-shirt colors).
+- **Deep Anatomical & Attribute Inspection**: Sub-region analysis for earrings, eyeglasses, headwear, upper/lower clothing colors, and posture (standing vs. sitting).
+- **Weapons & Carried Items Detection**: Perimeter and hand-zone inspection for rigid elongated objects or carried items.
+- **Temporal Dynamics & Motion History**: Real-time velocity tracking, motion direction (moving left/right/approaching/stationary), dwell times, and entry/exit events.
+- **Multi-Turn Conversational Memory**: Understands context, pronouns, and follow-up fragments (*"And what about the pants?"*).
+- **Multi-Camera Support**: Automatic detection of external USB webcams with DirectShow and runtime camera switching (`[C]`).
 
 ---
 
@@ -21,8 +23,11 @@ HackNex/
 │   └── yolov4-tiny.weights     # Model weights (auto-downloadable)
 │
 ├── detector.py                 # YOLOv4-tiny inference (cv2.dnn) + NumPy IoU tracker
-├── scene_builder.py            # Extracts spatial positions & torso/clothing colors
-├── qa_engine.py                # Rule-based natural language Q&A engine
+├── attribute_analyzer.py       # Tier 2: Anatomical zones (earrings, glasses, weapons, posture)
+├── temporal_tracker.py         # Tier 2: Motion vectors, dwell time, entry/exit event logs
+├── conversation_engine.py      # Tier 2: Multi-turn memory, follow-ups & coreference resolution
+├── scene_builder.py            # Enriches detections with attributes & temporal metrics
+├── qa_engine.py                # Visual reasoning & conversational natural language Q&A
 ├── utils.py                    # HSV color space analyzer & UI overlay drawing
 ├── setup_model.py              # Helper to download model weights if needed
 ├── main.py                     # Main application entry point
@@ -36,7 +41,7 @@ HackNex/
 
 ### 1. Clone the Repository
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/mrmohandas143/HackNex.git
 cd HackNex
 ```
 
@@ -84,25 +89,42 @@ venv\Scripts\python main.py path\to\video.mp4
 | Key | Action |
 |:---:|---|
 | `[C]` | **Switch Camera** — Dynamically toggle between built-in and external webcams |
-| `[Q]` | **Pause & Query** — Pauses the video and enters Q&A mode in the terminal |
+| `[Q]` | **Pause & Query** — Pauses the video and enters interactive Q&A mode in the terminal |
 | `[S]` | **Save Screenshot** — Saves the annotated frame as `capture_XXXXXX.png` |
 | `[ESC]` | **Exit** — Closes the application |
 
 ---
 
-## Interactive Q&A Mode `[Q]`
+## Example Queries in Tier 2 Q&A Mode `[Q]`
 
-When you press `[Q]`, the stream pauses and captures the current frame. You can ask questions in natural language:
+When you press `[Q]`, the stream pauses and captures the current frame. You can ask open-ended questions in natural language:
 
-- **Scene Description**:
-  - *"What is in the image?"* / *"What is in the frame?"* / *"Describe the scene"*
-- **Clothing / T-shirt Color**:
-  - *"Which color is the tshirt?"* / *"What color is the shirt?"* / *"What is the person wearing?"*
-- **Object Counting**:
-  - *"How many people are there?"* / *"How many cars are visible?"*
-- **Location**:
-  - *"Where is the person?"* / *"Where is the dog?"*
-- **Presence Verification**:
-  - *"Is there a cat?"* / *"Do you see any bicycles?"*
+### Accessories & Fine-Grained Attributes
+- *"Does the person wear any earrings?"*
+- *"Is the person wearing glasses?"*
+- *"Is the person wearing a hat?"*
+
+### Weapons & Carried Items
+- *"Does the person have any weapon?"*
+- *"Are they holding anything?"*
+
+### Posture & Actions
+- *"Is the person sitting or standing?"*
+- *"Which direction are they moving?"*
+- *"Is anyone moving or are they still?"*
+
+### Clothing & Outfits
+- *"What is the person wearing?"* (summarizes shirt, pants, accessories)
+- *"Which color is the tshirt?"*
+- *"What color are the pants?"*
+
+### Temporal & Activity Metrics
+- *"How long has the person been here?"*
+- *"Did anyone enter or leave recently?"*
+
+### Conversational Follow-Ups & Memory
+- **You**: *"What color is the shirt?"* ➔ **AI**: *"The person's shirt appears to be green."*
+- **You**: *"And what about the pants?"* ➔ **AI**: *"The person's pants appear to be blue."*
+- **You**: *"Repeat that"* ➔ **AI**: *"Previously, you asked..."*
 
 *Press **Enter** (blank query) or type `resume` to unpause the video and continue streaming.*
