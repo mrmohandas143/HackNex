@@ -15,12 +15,14 @@ class SceneBuilder:
       - Natural scene description
     """
 
-    def __init__(self):
+    def __init__(self, incident_manager=None):
         self.attr_analyzer = AttributeAnalyzer()
+        self.incident_manager = incident_manager
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def build(self, frame: np.ndarray, detections: list[dict]) -> dict:
+    def build(self, frame: np.ndarray, detections: list[dict],
+              frame_no: int = 0, video_time_sec: float = 0.0) -> dict:
         """
         Build an enriched scene context dict from a frame + detections.
         """
@@ -29,6 +31,8 @@ class SceneBuilder:
             "objects":       [],
             "object_counts": {},
             "total_count":   len(detections),
+            "frame_no":      frame_no,
+            "video_time_sec":video_time_sec,
         }
 
         for det in detections:
@@ -55,6 +59,44 @@ class SceneBuilder:
                     clothing_color = attrs["shirt_color"]
                 pants_color = attrs["pants_color"]
                 posture = attrs["posture"]
+
+                # Log weapon incident if detected
+                if self.incident_manager and attrs.get("weapon", {}).get("detected"):
+                    self.incident_manager.log_incident(
+                        event_type="weapon_alert",
+                        track_id=det["id"],
+                        class_name="person",
+                        frame=frame,
+                        frame_no=frame_no,
+                        video_time_sec=video_time_sec,
+                        bbox=(x1, y1, x2, y2),
+                        details=attrs["weapon"].get("details", "Suspicious object near hand zone"),
+                        attributes=attrs
+                    )
+
+            # Update best view in incident manager
+            if self.incident_manager:
+                area = (x2 - x1) * (y2 - y1)
+                tid = det["id"]
+                if tid not in self.incident_manager.best_keyframes or area > self.incident_manager.best_keyframes[tid]["area"]:
+                    rec = {
+                        "id":             len(self.incident_manager.incidents) + 1,
+                        "event_type":     "best_view",
+                        "track_id":       tid,
+                        "class":          det["class"],
+                        "frame_no":       frame_no,
+                        "video_time_sec": round(video_time_sec, 2),
+                        "time_str":       f"{int(video_time_sec//60):02d}:{video_time_sec%60:04.1f}",
+                        "bbox":           (x1, y1, x2, y2),
+                        "frame":          frame.copy(),
+                        "crop":           crop.copy() if crop.size > 0 else None,
+                        "details":        f"{det['class'].capitalize()} (ID #{tid}) best view",
+                        "attributes":     attrs or {},
+                    }
+                    self.incident_manager.best_keyframes[tid] = {
+                        "record": rec,
+                        "area":   area,
+                    }
 
             enriched = {
                 "id":               det["id"],

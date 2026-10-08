@@ -105,6 +105,7 @@ HackNex/
 │   └── yolov4-tiny.weights     # Pretrained model weights
 │
 ├── detector.py                 # YOLOv4-tiny inference (cv2.dnn) + NumPy Greedy IoU tracker
+├── incident_manager.py         # Visual incident evidence viewer & video seeking
 ├── attribute_analyzer.py       # Tier 2: Anatomical ROI slicing (earrings, glasses, weapons, posture)
 ├── temporal_tracker.py         # Tier 2: Motion vectors, dwell time, velocity, entry/exit logs
 ├── conversation_engine.py      # Tier 2: Multi-turn dialogue stack, coreference & pronoun resolution
@@ -214,7 +215,8 @@ venv\Scripts\python main.py path\to\video.mp4
 | Key | Function | Description |
 |:---:|:---:|---|
 | **`[C]`** | **Switch Camera** | Dynamically toggles between built-in and external USB webcams on the fly |
-| **`[Q]`** | **Pause & Query** | Pauses live video and enters interactive natural language Q&A mode in the terminal |
+| **`[Q]`** | **Pause & Query** | Pauses video, answers queries, and displays visual **Incident Evidence** |
+| **`[J]`** | **Jump to Incident**| Seeks video playback immediately to the latest recorded incident |
 | **`[S]`** | **Save Frame** | Captures and saves the annotated frame as `capture_XXXXXX.png` |
 | **`[ESC]`** | **Exit** | Safely releases hardware capture and exits the application |
 
@@ -222,9 +224,15 @@ venv\Scripts\python main.py path\to\video.mp4
 
 ## Example Queries in Tier 2 Q&A Mode `[Q]`
 
-When you press **`[Q]`**, live streaming pauses and the AI captures the current scene for visual reasoning. You can ask queries across multiple categories:
+When you press **`[Q]`**, live streaming pauses and the AI captures the current scene for visual reasoning. The system can open the **Incident Evidence Viewer** window and seek video playback directly to where an incident occurred:
 
-### 1. Accessories & Fine-Grained Features
+### 1. Incident Review & Video Seeking
+- `"When did the person enter?"` *(Opens snapshot where person entered; type 'jump' to seek video to that second)*
+- `"Where did the incident occur?"` / `"Show the incident"`
+- `"Show evidence"` / `"Where did they arrive?"`
+- Type **`jump`** or **`j`** in the terminal to jump video playback to that exact frame!
+
+### 2. Accessories & Fine-Grained Features
 - `"Does the person wear any earrings?"`
 - `"Is the person wearing glasses?"`
 - `"Is the person wearing a hat?"`

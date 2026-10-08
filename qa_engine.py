@@ -90,12 +90,29 @@ class QAEngine:
     temporal dynamics, and multi-turn conversational memory.
     """
 
-    def __init__(self, temporal_tracker=None):
+    def __init__(self, temporal_tracker=None, incident_manager=None):
         self.conv_engine = ConversationEngine()
         self.temporal_tracker = temporal_tracker
+        self.incident_manager = incident_manager
 
     def set_temporal_tracker(self, tracker):
         self.temporal_tracker = tracker
+
+    def set_incident_manager(self, mgr):
+        self.incident_manager = mgr
+
+    def answer_with_incident(self, query: str, scene: dict, frame=None,
+                             frame_no: int = 0, video_time_sec: float = 0.0) -> tuple[str, dict | None]:
+        """
+        Answer user query and retrieve the corresponding visual incident record.
+        """
+        ans = self.answer(query, scene, frame)
+        incident = None
+        if self.incident_manager:
+            incident = self.incident_manager.find_incident_for_query(
+                query, target_id=self.conv_engine.last_target_id, scene=scene
+            )
+        return ans, incident
 
     # ── Main Entry-Point ──────────────────────────────────────────────────────
 
@@ -139,6 +156,15 @@ class QAEngine:
                 ans = self._handle_glasses(scene, target_obj)
                 self.conv_engine.record_turn(query, ans, target_id=tid)
                 return ans
+
+        # ── 0c. Entry / Arrival / Incident Query ─────────────────────────
+        if self._match(q, ["when did", "entry", "arrive", "first appear", "came in", "arrived",
+                           "occur", "occurred", "incident", "happen", "happened",
+                           "where it occur", "where did it occur", "where it occurred",
+                           "show the incident", "show incident", "show evidence", "seek"]):
+            ans = self._handle_entry_or_incident(scene, target_obj, q)
+            self.conv_engine.record_turn(query, ans, target_id=tid)
+            return ans
 
         # ── 1. Accessories: Earrings ──────────────────────────────────────
         if self._match(q, ["earring", "earrings", "earing", "earings", "ear ring", "ear rings", "on the ear", "in the ear"]):
@@ -271,6 +297,20 @@ class QAEngine:
         return ans
 
     # ── Tier 2 Specialized Handlers ──────────────────────────────────────────
+
+    def _handle_entry_or_incident(self, scene: dict, target_obj: dict | None, query: str) -> str:
+        tid = target_obj["id"] if target_obj else None
+        if self.incident_manager:
+            inc = self.incident_manager.find_incident_for_query(query, target_id=tid, scene=scene)
+            if inc:
+                return (
+                    f"Incident located: {inc['details']} at {inc['time_str']} (Frame #{inc['frame_no']}). "
+                    f"Visual snapshot opened in 'Incident Evidence' window. Type 'jump' to seek video to this point."
+                )
+        if target_obj:
+            dwell = target_obj.get("dwell_time", 0.0)
+            return f"{target_obj['class'].capitalize()} (ID #{target_obj['id']}) entered approximately {dwell:.1f} seconds ago."
+        return "No specific entry incident found in current session."
 
     def _handle_earrings(self, scene: dict, target_obj: dict | None) -> str:
         persons = [o for o in scene.get("objects", []) if o["class"] == "person"]

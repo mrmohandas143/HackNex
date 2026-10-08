@@ -12,21 +12,25 @@ Maintains temporal buffers across video frames:
 import time
 import math
 from collections import deque
+import numpy as np
 
 
 class TemporalTracker:
     """Tracks object motion history, dwell times, and entry/exit events over time."""
 
-    def __init__(self, history_seconds: float = 60.0):
+    def __init__(self, history_seconds: float = 60.0, incident_manager=None):
         self.history_seconds = history_seconds
+        self.incident_manager = incident_manager
         # track_id -> dict
         self._tracks: dict[int, dict] = {}
         # Completed event logs
         self.events: deque[dict] = deque(maxlen=100)
 
-    def update(self, detections: list[dict], timestamp: float | None = None) -> list[dict]:
+    def update(self, detections: list[dict], timestamp: float | None = None,
+               frame: np.ndarray | None = None, frame_no: int = 0,
+               video_time_sec: float = 0.0) -> list[dict]:
         """
-        Update temporal history with current detections.
+        Update temporal history with current detections and log visual incidents.
         Enriches each detection with:
           - motion_direction: str ("stationary", "moving left", etc.)
           - velocity_px_s: float
@@ -60,13 +64,25 @@ class TemporalTracker:
                     "is_moving":       False,
                     "total_distance":  0.0,
                 }
+                msg = f"{det['class'].capitalize()} (ID #{tid}) entered the frame."
                 self.events.append({
                     "timestamp": now,
                     "type":      "entry",
                     "id":        tid,
                     "class":     det["class"],
-                    "message":   f"{det['class'].capitalize()} (ID #{tid}) entered the frame.",
+                    "message":   msg,
                 })
+                if self.incident_manager and frame is not None:
+                    self.incident_manager.log_incident(
+                        event_type="entry",
+                        track_id=tid,
+                        class_name=det["class"],
+                        frame=frame,
+                        frame_no=frame_no,
+                        video_time_sec=video_time_sec,
+                        bbox=det["bbox"],
+                        details=msg
+                    )
             else:
                 trk = self._tracks[tid]
                 trk["last_seen"] = now
@@ -90,13 +106,25 @@ class TemporalTracker:
                 if now - trk["last_seen"] > 2.5:
                     dead_ids.append(tid)
                     dwell = trk["last_seen"] - trk["first_seen"]
+                    msg = f"{trk['class'].capitalize()} (ID #{tid}) left the frame after {dwell:.1f}s."
                     self.events.append({
                         "timestamp": now,
                         "type":      "exit",
                         "id":        tid,
                         "class":     trk["class"],
-                        "message":   f"{trk['class'].capitalize()} (ID #{tid}) left the frame after {dwell:.1f}s.",
+                        "message":   msg,
                     })
+                    if self.incident_manager and frame is not None:
+                        self.incident_manager.log_incident(
+                            event_type="exit",
+                            track_id=tid,
+                            class_name=trk["class"],
+                            frame=frame,
+                            frame_no=frame_no,
+                            video_time_sec=video_time_sec,
+                            bbox=(0, 0, 0, 0),
+                            details=msg
+                        )
 
         for tid in dead_ids:
             del self._tracks[tid]

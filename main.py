@@ -1,6 +1,6 @@
 """
-main.py  —  Vision AI  (Tier 1)
-========================================
+main.py  —  Vision AI  (Tier 2 + Incident Evidence Viewer & Video Seeking)
+========================================================================
 Usage:
     python main.py              # auto-selects external webcam if connected, otherwise webcam 0
     python main.py 0            # built-in webcam (index 0)
@@ -8,7 +8,8 @@ Usage:
     python main.py video.mp4    # pre-recorded video file (loops automatically)
 
 Controls (OpenCV window):
-    [Q]   Pause + enter query mode in terminal
+    [Q]   Pause + enter query mode in terminal (views incident evidence & jump)
+    [J]   Jump video playback to latest incident point
     [C]   Switch camera (cycles built-in <-> external webcam)
     [S]   Save annotated frame as PNG
     [ESC] Exit
@@ -16,6 +17,7 @@ Controls (OpenCV window):
 
 import os
 import sys
+import time
 
 # Silence noisy low-level OpenCV backend enumeration warnings on Windows
 os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
@@ -26,6 +28,7 @@ from detector import YOLODetector
 from scene_builder import SceneBuilder
 from qa_engine import QAEngine
 from temporal_tracker import TemporalTracker
+from incident_manager import IncidentManager
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -33,26 +36,30 @@ BANNER = r"""
   ╔══════════════════════════════════════════════════════════════╗
   ║     Vision AI  —  Tier 2  (Deep Attributes & Reasoning)     ║
   ║  YOLO + Temporal Tracking + Anatomical Analysis + Memory Q&A ║
+  ║       ★ INCIDENT EVIDENCE VIEWER & VIDEO SEEKING ★          ║
   ╚══════════════════════════════════════════════════════════════╝
 """
 
 HELP = """
   Controls (OpenCV window)
   ─────────────────────────────────────
-  [Q]    Pause video  ->  enter query in terminal
+  [Q]    Pause video  ->  enter query in terminal (auto-shows incident evidence!)
+  [J]    Jump video to latest incident point
   [C]    Switch camera (toggle built-in / external webcam)
   [S]    Save annotated frame as PNG
   [ESC]  Exit
 
-  Example Tier 2 queries:
+  Incident & Visual Reasoning Queries:
   ─────────────────────────────────────
-  Accessories:    "Does the person wear any earrings?"
-                  "Is the person wearing glasses?" / "Any hat?"
-  Weapons & Items:"Does the person have any weapon?"
+  Incident Review:"Show when the person entered" / "When did they enter?"
+                  "Show where the incident occurred" / "Show evidence"
+  Weapons & Items:"Does the person have any weapon?" (shows close-up)
                   "Are they holding anything?"
+  Accessories:    "Does the person wear any earrings?" (shows ear zoom)
+                  "Is the person wearing glasses?" / "Any hat?"
   Outfit & Color: "What is the person wearing?"
                   "Which color is the tshirt?" / "What color are the pants?"
-  Posture & Action:"Is the person sitting or standing?"
+  Posture & Motion:"Is the person sitting or standing?"
                   "Which direction are they moving?"
   Temporal Memory:"How long has the person been here?"
                   "Did anyone enter or leave recently?"
@@ -136,19 +143,35 @@ def resolve_source(args: list[str]) -> tuple[int | str, list[int], int]:
     return 0, cam_indices, 0
 
 
-def query_loop(qa: QAEngine, scene: dict, raw_frame) -> None:
-    """Blocking terminal Q&A session. Returns when user is done."""
-    print("\n" + "=" * 58)
-    print("  [PHOTO] VIDEO PAUSED  --  Frame captured for analysis")
-    print("-" * 58)
+def query_loop(qa: QAEngine,
+               incident_manager: IncidentManager,
+               scene: dict,
+               raw_frame: np.ndarray,
+               frame_no: int,
+               video_time_sec: float,
+               is_video_file: bool) -> int | None:
+    """
+    Blocking terminal Q&A session.
+    Displays visual incident evidence on screen and returns a target frame to seek video to (if requested).
+    """
+    print("\n" + "=" * 60)
+    print("  [PHOTO] VIDEO PAUSED  --  Frame captured for visual reasoning")
+    print("-" * 60)
 
     if scene.get("objects"):
         print(f"  Scene: {scene['description']}")
     else:
         print("  Scene: No objects detected in the paused frame.")
 
-    print("-" * 58)
-    print("  Type a question -- or press Enter (blank) to resume.\n")
+    print("-" * 60)
+    print("  Type a question -- or press Enter (blank) to resume playback.")
+    if is_video_file:
+        print("  (Tip: ask 'when did person enter?' or type 'jump' to seek video)\n")
+    else:
+        print()
+
+    jump_target_frame = None
+    active_evidence_win = False
 
     while True:
         try:
@@ -159,23 +182,65 @@ def query_loop(qa: QAEngine, scene: dict, raw_frame) -> None:
         if not raw or raw.lower() in {"resume", "r", "exit", "quit", "q"}:
             break
 
-        answer = qa.answer(raw, scene, raw_frame)
+        # Check if user explicitly asked to seek/jump to current incident
+        if raw.lower() in {"jump", "j", "seek"} and incident_manager.incidents:
+            target_inc = incident_manager.incidents[-1]
+            jump_target_frame = target_inc["frame_no"]
+            print(f"\n  [VIDEO SEEK] Seeking video to Frame #{jump_target_frame} ({target_inc['time_str']})!\n")
+            break
+
+        # Answer query and find matching incident
+        answer, incident = qa.answer_with_incident(
+            raw, scene, raw_frame, frame_no=frame_no, video_time_sec=video_time_sec
+        )
         print(f"\n  (AI) AI  : {answer}\n")
 
-    print("=" * 58)
-    print("  [PLAY] Video resumed.\n")
+        # Visual incident display
+        if incident is not None:
+            try:
+                evidence_card = incident_manager.render_evidence_view(incident)
+                cv2.namedWindow("Incident Evidence", cv2.WINDOW_NORMAL)
+                cv2.imshow("Incident Evidence", evidence_card)
+                cv2.waitKey(1)
+                active_evidence_win = True
+
+                print("-" * 60)
+                print(f"  📸  INCIDENT EVIDENCE LOCATED:")
+                print(f"      Event : {incident['event_type'].upper()} ({incident['class']} #{incident['track_id']})")
+                print(f"      Point : {incident['time_str']}  (Frame #{incident['frame_no']})")
+                print(f"      Image : Opened in 'Incident Evidence' window!")
+                if is_video_file:
+                    print(f"  👉  Type 'jump' or 'j' to seek video to this incident.")
+                print("-" * 60)
+
+                # If query explicitly asked to jump or seek, auto-set jump target
+                if any(w in raw.lower() for w in ["jump", "seek", "where it occur", "where did it occur"]):
+                    jump_target_frame = incident["frame_no"]
+                    print(f"  [SEEK] Video will seek to Frame #{jump_target_frame} on resume.\n")
+            except Exception as e:
+                print(f"[WARN] Could not display incident window: {e}")
+
+    # Clean up evidence popup when resuming main stream
+    if active_evidence_win:
+        cv2.destroyWindow("Incident Evidence")
+
+    print("=" * 60)
+    print("  [PLAY] Resuming video playback.\n")
+    return jump_target_frame
 
 
 def main() -> None:
     print(BANNER)
 
     source, cam_indices, current_cam = resolve_source(sys.argv[1:])
+    is_video_file = isinstance(source, str)
 
     # ── Component init ────────────────────────────────────────────────────
     detector         = YOLODetector()
-    temporal_tracker = TemporalTracker()
-    scene_builder    = SceneBuilder()
-    qa_engine        = QAEngine(temporal_tracker=temporal_tracker)
+    incident_manager = IncidentManager()
+    temporal_tracker = TemporalTracker(incident_manager=incident_manager)
+    scene_builder    = SceneBuilder(incident_manager=incident_manager)
+    qa_engine        = QAEngine(temporal_tracker=temporal_tracker, incident_manager=incident_manager)
 
     print(HELP)
 
@@ -194,11 +259,14 @@ def main() -> None:
         print("[ERROR] Failed to open any video capture device. Exiting.")
         sys.exit(1)
 
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    fps = fps if (fps and fps > 0) else 30.0
+
     def get_title(src):
         if isinstance(src, int):
             kind = "Built-in" if src == 0 else f"External Cam #{src}"
-            return f"Vision AI [{kind}]  [Q=Query | C=Switch Cam | S=Save | ESC=Exit]"
-        return f"Vision AI [{os.path.basename(src)}]  [Q=Query | S=Save | ESC=Exit]"
+            return f"Vision AI [{kind}]  [Q=Query | J=Jump Incident | C=Switch | S=Save | ESC=Exit]"
+        return f"Vision AI [{os.path.basename(src)}]  [Q=Query | J=Jump Incident | S=Save | ESC=Exit]"
 
     win_title = get_title(source)
     cv2.namedWindow("Vision AI", cv2.WINDOW_NORMAL)
@@ -210,16 +278,18 @@ def main() -> None:
     annotated_frame  = None
     paused           = False
     frame_no         = 0
+    start_time       = time.time()
 
-    print("[INFO] Stream started -- press [Q] for query, [C] to switch cameras.\n")
+    print("[INFO] Stream started -- press [Q] for query & incident view, [J] to jump video.\n")
 
     while True:
         # ── Capture ───────────────────────────────────────────────────────
         if not paused:
             ret, frame = cap.read()
             if not ret or frame is None:
-                if isinstance(source, str):  # video file ended -> loop
+                if is_video_file:  # video file ended -> loop
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    frame_no = 0
                     continue
                 print("[WARN] Camera grab returned empty frame. Retrying...")
                 key = cv2.waitKey(30) & 0xFF
@@ -228,13 +298,18 @@ def main() -> None:
                 continue
 
             frame_no += 1
+            video_time_sec = (frame_no / fps) if is_video_file else (time.time() - start_time)
 
             # ── YOLO detect + track ───────────────────────────────────────
             detections = detector.detect(frame)
-            detections = temporal_tracker.update(detections)
+            detections = temporal_tracker.update(
+                detections, frame=frame, frame_no=frame_no, video_time_sec=video_time_sec
+            )
 
             # ── Build scene context ───────────────────────────────────────
-            scene = scene_builder.build(frame, detections)
+            scene = scene_builder.build(
+                frame, detections, frame_no=frame_no, video_time_sec=video_time_sec
+            )
             latest_scene     = scene
             latest_raw_frame = frame.copy()
 
@@ -253,13 +328,33 @@ def main() -> None:
             print("\n[INFO] Exiting Vision AI.")
             break
 
-        # ── Q -> query mode ───────────────────────────────────────────────
+        # ── Q -> query mode (with Incident Evidence display & Seek) ───────
         elif key in (ord('q'), ord('Q')):
             paused = True
             cv2.setWindowTitle("Vision AI", "Vision AI  [PAUSED -- check terminal for Q&A]")
-            query_loop(qa_engine, latest_scene, latest_raw_frame)
+            target_seek_frame = query_loop(
+                qa_engine, incident_manager, latest_scene, latest_raw_frame,
+                frame_no=frame_no, video_time_sec=video_time_sec, is_video_file=is_video_file
+            )
+            if target_seek_frame is not None and is_video_file:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, target_seek_frame)
+                frame_no = target_seek_frame
+                print(f"[VIDEO] Jumped playback to Frame #{target_seek_frame}!\n")
+
             paused = False
             cv2.setWindowTitle("Vision AI", get_title(source))
+
+        # ── J -> jump to latest incident ──────────────────────────────────
+        elif key in (ord('j'), ord('J')) and incident_manager.incidents:
+            latest_inc = incident_manager.incidents[-1]
+            print(f"\n[INCIDENT] Displaying latest incident: {latest_inc['details']} ({latest_inc['time_str']})")
+            card = incident_manager.render_evidence_view(latest_inc)
+            cv2.namedWindow("Incident Evidence", cv2.WINDOW_NORMAL)
+            cv2.imshow("Incident Evidence", card)
+            if is_video_file:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, latest_inc["frame_no"])
+                frame_no = latest_inc["frame_no"]
+                print(f"[VIDEO] Playback jumped to incident Frame #{latest_inc['frame_no']}!")
 
         # ── C -> switch camera ────────────────────────────────────────────
         elif key in (ord('c'), ord('C')) and cam_indices:
